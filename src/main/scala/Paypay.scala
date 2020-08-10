@@ -42,6 +42,7 @@ object Paypay {
 
     spark.sparkContext.setLogLevel("ERROR")
 
+    // pre-process data
     val data = sc
       .textFile("data/2015_07_22_mktplace_shop_web_log_sample.log.gz")
       .map(lineParser)
@@ -50,20 +51,25 @@ object Paypay {
 
     println(data.count)
 
+    // make dataframe
     val df = spark.createDataFrame(data).toDF(ColumnName.timestamp.toString, ColumnName.clientIp.toString, ColumnName.request.toString, ColumnName.user_agent.toString)
 
+    // make window function over client with same ip   
     val windowSpec = Window.partitionBy(ColumnName.clientIp.toString).orderBy(ColumnName.timestamp.toString)
 
     val durationColName = "duration(ms)"
     val sessionIdColName = "sessionId"
     val newSessionColName = "newSession"
 
+    // after sorting timestamps, take the difference with the previous timestamp
     val duration = df.withColumn(
       durationColName, col(ColumnName.timestamp.toString) - lag(df(ColumnName.timestamp.toString), 1).over(windowSpec))
       .na.fill(0, Seq(durationColName))
 
+    // a new session is when the difference with the previous timestamp exceeds 15 min
     val sessionFlag = duration.withColumn(newSessionColName, when(col(durationColName) > 15 * 60 * 1000, 1).otherwise(0))
 
+    // create "session id" based on ip, userAgent and newSession - just for demo purpose. This is obviously not the real-world session id
     val session = sessionFlag.withColumn(sessionIdColName,
       concat(col(ColumnName.clientIp.toString), sum(newSessionColName).over(windowSpec).cast("string"), col(ColumnName.user_agent.toString))).cache
 
